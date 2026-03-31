@@ -1,0 +1,53 @@
+.ai-word-helper-popup {
+    position: absolute;
+    z-index: 2147483647;
+    width: 360px;
+    max-width: calc(100vw - 20px);
+    background: #1f1f1f;
+    color: #ffffff;
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ai-word-helper-popup .title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.ai-word-helper-popup .muted {
+    opacity: 0.8;
+}
+
+.ai-word-helper-popup .sentence {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    opacity: 0.92;
+    font-style: italic;
+}
+
+.ai-word-helper-popup .buttons {
+    margin-top: 12px;
+}
+
+.ai-word-helper-popup button {
+    margin-right: 8px;
+    margin-top: 4px;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    background: #ffffff;
+    color: #111111;
+    font-weight: 600;
+}
+
+.ai-word-helper-popup .error {
+    color: #ffb3b3;
+}
