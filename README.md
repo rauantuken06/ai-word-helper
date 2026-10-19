@@ -1,33 +1,103 @@
-# 🚀 AI Word Helper
+﻿# AI Word Helper
 
-> Instantly understand English words while reading — without leaving the page.
+Браузерное расширение для изучения английского: двойной щелчок по слову показывает перевод на русский, значение в контексте и часть речи.
 
-AI Word Helper is a browser extension powered by AI that helps you learn English directly from real content.  
-Just double-click any word and get an instant translation with contextual meaning.
+## Локальный ИИ без платного API
 
----
-
-## ✨ Features
-
-- ⚡ Double-click any English word to translate it
-- 🧠 Context-aware explanation (not just raw translation)
-- 📖 Shows the sentence where the word is used
-- 🏷 Identifies part of speech
-- 💾 Save words for later learning (local storage)
-- 🎯 Designed for real reading (articles, blogs, books)
-
----
-
-## 🎥 How it works
-
-1. Open any website with English text  
-2. Double-click a word  
-3. Get a smart popup with translation and meaning  
-
----
-
-## 🧠 Example
-
-**Input:**
 ```text
-He finally managed to pull it off.
+Расширение браузера → Node.js (127.0.0.1:3000) → Ollama (127.0.0.1:11434) → gemma3:4b
+```
+
+Переводы выполняются на вашем компьютере. Ключ OpenAI и оплата запросов не нужны. После установки зависимостей и скачивания модели ИИ работает без интернета; загрузка самих веб-страниц может требовать подключения. Модель использует память, процессор/видеокарту и электричество. Это локальный вариант для личного использования: каждому пользователю пока нужны свой сервер и Ollama.
+
+По умолчанию используется `gemma3:4b`. Размер загрузки модели — несколько гигабайт; для работы нужна дополнительная свободная память. Скорость и качество зависят от компьютера и модели. Первый запрос может выполняться дольше из-за загрузки модели в память. Качество переводов нужно проверить на ваших примерах; оно не гарантируется на уровне прежней облачной модели.
+
+## Запуск в Windows
+
+Нужны Node.js 22+ и [Ollama для Windows](https://ollama.com/download/windows).
+
+1. Установите и запустите Ollama. После установки откройте новый терминал и скачайте модель:
+
+   ```powershell
+   ollama pull gemma3:4b
+   ```
+
+   Приложение Ollama обычно запускает локальный API автоматически. Если оно не запущено, выполните `ollama serve` в отдельном терминале. Если порт уже занят работающей Ollama, второй экземпляр запускать не нужно.
+
+2. Из корня репозитория установите зависимости и запустите сервер:
+
+   ```powershell
+   cd .\ai-word-helper\server
+   npm.cmd ci
+   npm.cmd start
+   ```
+
+   В Windows используется `npm.cmd`, чтобы команды работали и при запрете запуска PowerShell-скриптов. На macOS/Linux можно использовать `npm`.
+
+   Файл `.env` необязателен. Если хотите изменить настройки, скопируйте пример **только если собственного `.env` ещё нет**:
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+   Старый `OPENAI_API_KEY` больше не используется. Его можно удалить из вашего `.env`.
+
+3. Откройте `chrome://extensions` (или `edge://extensions`), включите режим разработчика и выберите «Загрузить распакованное расширение». Укажите папку `ai-word-helper/extension` в репозитории. Если расширение уже установлено, нажмите «Обновить» на его карточке.
+
+4. Перезагрузите страницу с английским текстом и дважды щёлкните по слову. Появятся перевод, объяснение значения в контексте, часть речи и исходное предложение. На служебных страницах браузера расширения не работают.
+
+## Настройки
+
+Все настройки сервера задаются в `ai-word-helper/server/.env`; после изменения перезапустите сервер.
+
+| Переменная | По умолчанию | Назначение |
+| --- | --- | --- |
+| `PORT` | `3000` | Порт Node.js. При изменении также поменяйте URL в `extension/content.js` и разрешение в `extension/manifest.json`. |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Локальный HTTP-адрес Ollama. Поддерживаются localhost, 127.0.0.1 и [::1]. |
+| `OLLAMA_MODEL` | `gemma3:4b` | Установленная локальная модель. Модели с `cloud` в названии отклоняются. |
+| `AI_TIMEOUT_MS` | `120000` | Максимальное ожидание ответа в миллисекундах. |
+
+Можно попробовать другую локальную модель: сначала выполните `ollama pull ИМЯ_МОДЕЛИ`, затем укажите её в `OLLAMA_MODEL`. Проверьте поддержку русского языка и JSON-ответов. Сервер запрашивает JSON по схеме и проверяет наличие всех полей; слово и исходное предложение берёт из запроса, чтобы модель не меняла их.
+
+## Проверка и диагностика
+
+Из папки `ai-word-helper/server`:
+
+```powershell
+npm.cmd test
+```
+
+Тесты проверяют HTTP-контракт расширения, валидацию запросов, ответы модели и обработку ошибок. Они используют имитацию Ollama и не требуют скачанной модели или API-ключа.
+
+Проверка запуска Node.js:
+
+```powershell
+Invoke-RestMethod http://localhost:3000/
+```
+
+Этот адрес подтверждает только работу сервера, без проверки модели. Полная проверка перевода:
+
+```powershell
+$translationRequest = @{
+    word = 'bank'
+    sentence = 'We sat on the bank of the river.'
+} | ConvertTo-Json
+Invoke-RestMethod -Uri http://localhost:3000/translate -Method Post -ContentType 'application/json' -Body $translationRequest
+```
+
+В этом примере ожидается значение «берег», а не «банк».
+
+- **Нет соединения с Ollama:** запустите приложение Ollama или `ollama serve`.
+- **Модель не найдена:** выполните `ollama pull gemma3:4b` (либо скачайте модель, указанную в `.env`). Установленные модели: `ollama list`.
+- **Модель не успела ответить:** повторите запрос после загрузки модели; при необходимости увеличьте `AI_TIMEOUT_MS`.
+- **Не хватает памяти или Ollama вернула ошибку:** закройте тяжёлые приложения, проверьте журнал Ollama или выберите меньшую модель; качество может измениться.
+- **Нет соединения с сервером:** проверьте `npm.cmd start` и доступность `http://localhost:3000/`.
+
+Сервер слушает только `127.0.0.1`. Публичное размещение и многопользовательский режим требуют отдельной настройки.
+
+## Документация технологий
+
+- [Ollama: локальный API без авторизации](https://docs.ollama.com/api/authentication)
+- [Ollama Chat API и JSON-схемы](https://docs.ollama.com/api/chat)
+- [Gemma 3: модели, размеры и языки](https://ollama.com/library/gemma3)
+- [Ollama в Windows](https://docs.ollama.com/windows)

@@ -4,21 +4,21 @@ document.addEventListener("dblclick", async (event) => {
     const target = event.target;
 
     if (target instanceof HTMLElement) {
-        if (target.closest("input, textarea")) return;
+        if (target.closest("input, textarea, .ai-word-helper-popup")) return;
         if (target.isContentEditable) return;
     }
 
     const selection = window.getSelection();
     const selectedText = selection ? selection.toString().trim() : "";
+    const pointedWord = getWordAtPoint(event);
+    const word = pointedWord?.word || selectedText;
 
-    if (!selectedText) return;
-    if (selectedText.split(/\s+/).length > 1) return;
-    if (!/^[A-Za-z'-]+$/.test(selectedText)) return;
+    if (!/^[A-Za-z]+(?:['’‘‐‑-][A-Za-z]+)*$/.test(word)) return;
 
-    const sentence = getSentenceFromSelection(selection);
+    const sentence = pointedWord?.sentence || getSentenceFromSelection(selection) || word;
 
     removePopup();
-    showLoadingPopup(event.pageX, event.pageY, selectedText);
+    showLoadingPopup(event.pageX, event.pageY, word);
 
     try {
         const response = await fetch("http://localhost:3000/translate", {
@@ -27,14 +27,14 @@ document.addEventListener("dblclick", async (event) => {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                word: selectedText,
+                word,
                 sentence
             })
         });
         
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Server error: ${response.status} ${errorText}`);
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.details || `Ошибка сервера: ${response.status}`);
         }
 
         const data = await response.json();
@@ -44,9 +44,35 @@ document.addEventListener("dblclick", async (event) => {
     } catch (error) {
         console.error(error);
         removePopup();
-        showErrorPopup(event.pageX, event.pageY, "Не удалось получить перевод. Проверьте, запущен ли сервер.")
+        showErrorPopup(event.pageX, event.pageY, error instanceof TypeError
+            ? "Не удалось подключиться к серверу. Запустите сервер командой npm start."
+            : error.message);
     }
-});
+}, true);
+
+// Some readers disable text selection. Locate the rendered word independently
+// of window.getSelection(), using viewport coordinates for the hit test.
+function getWordAtPoint(event) {
+    if (!(event.target instanceof HTMLElement)) return null;
+    const walker = document.createTreeWalker(event.target, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    let node;
+    while ((node = walker.nextNode())) {
+        const text = node.textContent || "";
+        for (const match of text.matchAll(/[A-Za-z]+(?:['’‘‐‑-][A-Za-z]+)*/g)) {
+            range.setStart(node, match.index);
+            range.setEnd(node, match.index + match[0].length);
+            const hit = Array.from(range.getClientRects()).some(rect =>
+                rect.width > 0 && rect.height > 0 &&
+                event.clientX >= rect.left && event.clientX <= rect.right &&
+                event.clientY >= rect.top && event.clientY <= rect.bottom);
+            if (hit) {
+                return { word: match[0], sentence: getSentenceAtOffset(text, match.index) };
+            }
+        }
+    }
+    return null;
+}
 
 document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") removePopup();
@@ -59,8 +85,10 @@ function getSentenceFromSelection(selection) {
     if (node.nodeType !== Node.TEXT_NODE) return "";
 
     const text = node.textContent || "";
-    const offset = selection.anchorOffset;
+    return getSentenceAtOffset(text, selection.anchorOffset);
+}
 
+function getSentenceAtOffset(text, offset) {
     let start = offset;
     let end = offset;
 
