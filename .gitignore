@@ -36,6 +36,9 @@ temp/
 # Chrome extension local stuff
 *.pem
 
+# Testing
+diagnostics/
+
 # Optional: lockfiles if you do NOT want to commit them
 # package-lock.json
 # yarn.lock
