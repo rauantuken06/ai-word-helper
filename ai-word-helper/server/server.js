@@ -1,16 +1,18 @@
 ﻿import dotenv from "dotenv";
 import { createApp } from "./app.js";
 import { createTranslator } from "./translator.js";
+import { withTranslationCache } from "./helper/translation-cache.js";
 
 dotenv.config();
 
 const port = process.env.PORT || 3000;
 const model = process.env.OLLAMA_MODEL || "gemma3:4b";
-const translate = createTranslator({
+const rawTranslate = createTranslator({
   baseUrl: process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434",
   model,
   timeoutMs: Number(process.env.AI_TIMEOUT_MS || 120000)
 });
+const translate = withTranslationCache(rawTranslate);
 const app = createApp({ translate, model });
 
 app.listen(port, "127.0.0.1", () => {

@@ -12,6 +12,7 @@ test("sends a structured local request and preserves source text", async () => {
     const body = JSON.parse(options.body);
     assert.equal(body.model, "gemma3:4b");
     assert.equal(body.stream, false);
+    assert.equal(body.options.temperature, 0.2);
     assert.deepEqual(body.format.required, Object.keys(answer));
     assert.deepEqual(JSON.parse(body.messages[1].content), input);
     assert.equal(options.headers.Authorization, undefined);
