@@ -87,3 +87,22 @@ test("editable text does not trigger translation", async () => {
   await page.click(3);
   assert.equal(page.requests.length, 0);
 });
+
+function highlight(sentence, word) {
+  const context = vm.createContext({ document: { addEventListener() {} }, sentence, word });
+  vm.runInContext(source, context);
+  return vm.runInContext("highlightWord(sentence, word)", context);
+}
+
+test("card highlights whole words case-insensitively, including repeated words", () => {
+  assert.equal(highlight("Create, create! Recreate.", "create"),
+    "<mark>Create</mark>, <mark>create</mark>! Recreate.");
+  assert.equal(highlight("I don’t know.", "don’t"), "I <mark>don’t</mark> know.");
+});
+
+test("card escapes HTML in both highlighted words and surrounding text", () => {
+  assert.equal(highlight('<img src=x onerror="alert(1)"> create & run', "create"),
+    '&lt;img src=x onerror=&quot;alert(1)&quot;&gt; <mark>create</mark> &amp; run');
+  assert.equal(highlight("Use <b> here", "<b>"), "Use <mark>&lt;b&gt;</mark> here");
+  assert.equal(highlight("Use a+b here", "a+b"), "Use <mark>a+b</mark> here");
+});

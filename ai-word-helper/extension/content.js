@@ -88,8 +88,8 @@ function showLoadingPopup(x, y, word) {
     helperPopup.style.left = `${x + 10}px`;
     helperPopup.style.top = `${y + 10}px`;
     helperPopup.innerHTML = `
-        <div class="title">${escapeHtml(word)}</div>
-        <div class="muted">Перевожу...</div>
+        <div class="title word-badge">${escapeHtml(word)}</div>
+        <div class="muted" role="status">Перевожу…</div>
     `;
     document.body.appendChild(helperPopup);
     keepPopupInViewport(helperPopup);
@@ -106,31 +106,35 @@ function showResultPopup(x, y, data) {
     const hasDetails = Boolean(
         data.contextMeaning && data.partOfSpeech
     );
+    popup.classList.toggle("is-detailed", hasDetails);
+    popup.setAttribute("role", "region");
+    popup.setAttribute("aria-label", `Перевод слова ${data.word || ""}`);
 
     popup.innerHTML = `
-        <div class="title">${escapeHtml(data.word || "")}</div>
-
-        <div>
-        <strong>Перевод:</strong>
-        ${escapeHtml(data.translation || "")}
+        <div class="card-header">
+            <div class="word-tags">
+                <span class="title word-badge" lang="en">${escapeHtml(data.word || "")}</span>
+                ${hasDetails ? `<span class="part-of-speech">${escapeHtml(data.partOfSpeech)}</span>` : ""}
+            </div>
+            <button type="button" class="speak-btn" aria-label="Произнести слово" title="Произнести слово">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M16 9a5 5 0 0 1 0 6m3-9a9 9 0 0 1 0 12"/>
+                </svg>
+            </button>
         </div>
 
+        <div class="translation" lang="ru">${escapeHtml(data.translation || "")}</div>
+
         ${hasDetails ? `
-        <div>
+        <div class="context-meaning">
             <strong>В этом контексте:</strong>
             ${escapeHtml(data.contextMeaning)}
         </div>
-        <div>
-            <strong>Часть речи:</strong>
-            ${escapeHtml(data.partOfSpeech)}
-        </div>
         ` : ""}
 
-        <div class="sentence">
-        ${escapeHtml(data.sentence || "")}
-        </div>
+        ${data.sentence ? `<div class="sentence" lang="en">${highlightWord(data.sentence, data.word)}</div>` : ""}
 
-        <div class="details-error error"></div>
+        <div class="details-error error" role="status" aria-live="polite"></div>
 
         <div class="buttons">
         ${hasDetails ? "" : `
@@ -142,6 +146,19 @@ function showResultPopup(x, y, data) {
 
     popup.querySelector(".close-btn")
         .addEventListener("click", removePopup);
+
+    const speakButton = popup.querySelector(".speak-btn");
+    if ("speechSynthesis" in window && "SpeechSynthesisUtterance" in window) {
+        speakButton.addEventListener("click", () => {
+            const utterance = new window.SpeechSynthesisUtterance(data.word || "");
+            utterance.lang = "en-US";
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(utterance);
+        });
+    } else {
+        speakButton.disabled = true;
+        speakButton.title = "Озвучивание недоступно в этом браузере";
+    }
 
     const detailsButton = popup.querySelector(".details-btn");
 
@@ -186,7 +203,8 @@ function showErrorPopup(x, y, message) {
     helperPopup.style.left = `${x + 10}px`;
     helperPopup.style.top = `${y + 10}px`;
     helperPopup.innerHTML = `
-        <div class="error">${escapeHtml(message)}</div>
+        <div class="word-badge">Ошибка перевода</div>
+        <div class="error" role="alert">${escapeHtml(message)}</div>
         <div class="buttons">
             <button class="close-btn">Закрыть</button>
         </div>
@@ -226,6 +244,21 @@ function escapeHtml(str) {
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#039;")
+}
+
+function highlightWord(sentence, word) {
+    if (!word) return escapeHtml(sentence);
+    const escapedWord = String(word).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(^|[^A-Za-z’‘'‐‑-])(${escapedWord})(?=$|[^A-Za-z’‘'‐‑-])`, "gi");
+    let result = "";
+    let offset = 0;
+    for (const match of String(sentence).matchAll(pattern)) {
+        const start = match.index + match[1].length;
+        result += escapeHtml(sentence.slice(offset, start));
+        result += `<mark>${escapeHtml(match[2])}</mark>`;
+        offset = start + match[2].length;
+    }
+    return result + escapeHtml(sentence.slice(offset));
 }
 
 async function fetchTranslation(word, sentence, mode) {
