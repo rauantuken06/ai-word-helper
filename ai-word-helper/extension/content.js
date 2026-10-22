@@ -21,23 +21,7 @@ document.addEventListener("dblclick", async (event) => {
     showLoadingPopup(event.pageX, event.pageY, word);
 
     try {
-        const response = await fetch("http://localhost:3000/translate", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                word,
-                sentence
-            })
-        });
-        
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.details || `Ошибка сервера: ${response.status}`);
-        }
-
-        const data = await response.json();
+        const data = await fetchTranslation(word, sentence, "quick");
 
         removePopup();
         showResultPopup(event.pageX, event.pageY, data);
@@ -112,26 +96,88 @@ function showLoadingPopup(x, y, word) {
 }
 
 function showResultPopup(x, y, data) {
-    helperPopup = document.createElement("div");
-    helperPopup.className = "ai-word-helper-popup";
-    helperPopup.style.left = `${x + 10}px`;
-    helperPopup.style.top = `${y + 10}px`;
+    const popup = document.createElement("div");
+    helperPopup = popup;
 
-    helperPopup.innerHTML = `
+    popup.className = "ai-word-helper-popup";
+    popup.style.left = `${x + 10}px`;
+    popup.style.top = `${y + 10}px`;
+
+    const hasDetails = Boolean(
+        data.contextMeaning && data.partOfSpeech
+    );
+
+    popup.innerHTML = `
         <div class="title">${escapeHtml(data.word || "")}</div>
-        <div><strong>Перевод:</strong> ${escapeHtml(data.translation || "")}</div>
-        <div><strong>В этом контексте:</strong> ${escapeHtml(data.contextMeaning || "")}</div>
-        <div><strong>Часть речи:</strong> ${escapeHtml(data.partOfSpeech || "")}</div>
-        <div class="sentence">${escapeHtml(data.sentence || "")}</div>
+
+        <div>
+        <strong>Перевод:</strong>
+        ${escapeHtml(data.translation || "")}
+        </div>
+
+        ${hasDetails ? `
+        <div>
+            <strong>В этом контексте:</strong>
+            ${escapeHtml(data.contextMeaning)}
+        </div>
+        <div>
+            <strong>Часть речи:</strong>
+            ${escapeHtml(data.partOfSpeech)}
+        </div>
+        ` : ""}
+
+        <div class="sentence">
+        ${escapeHtml(data.sentence || "")}
+        </div>
+
+        <div class="details-error error"></div>
+
         <div class="buttons">
-            <button class="close-btn">Закрыть</button>
+        ${hasDetails ? "" : `
+            <button class="details-btn">Подробнее</button>
+        `}
+        <button class="close-btn">Закрыть</button>
         </div>
     `;
 
-    helperPopup.querySelector(".close-btn").addEventListener("click", removePopup);
+    popup.querySelector(".close-btn")
+        .addEventListener("click", removePopup);
 
-    document.body.appendChild(helperPopup);
-    keepPopupInViewport(helperPopup);
+    const detailsButton = popup.querySelector(".details-btn");
+
+    if (detailsButton) {
+        detailsButton.addEventListener("click", async () => {
+        detailsButton.disabled = true;
+        detailsButton.textContent = "Загружаю…";
+        popup.querySelector(".details-error").textContent = "";
+
+        try {
+            const details = await fetchTranslation(
+            data.word,
+            data.sentence,
+            "full"
+            );
+
+            // Не заменяем окно другого слова или уже закрытое окно.
+            if (helperPopup !== popup || !popup.isConnected) return;
+
+            removePopup();
+            showResultPopup(x, y, details);
+        } catch (error) {
+            if (helperPopup !== popup || !popup.isConnected) return;
+
+            popup.querySelector(".details-error").textContent =
+            error.message || "Не удалось загрузить объяснение.";
+
+            detailsButton.disabled = false;
+            detailsButton.textContent = "Повторить";
+            keepPopupInViewport(popup);
+        }
+        });
+    }
+
+    document.body.appendChild(popup);
+    keepPopupInViewport(popup);
 }
 
 function showErrorPopup(x, y, message) {
@@ -180,4 +226,22 @@ function escapeHtml(str) {
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#039;")
+}
+
+async function fetchTranslation(word, sentence, mode) {
+    const response = await fetch("http://localhost:3000/translate", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ word, sentence, mode })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(data.details || "Не удалось получить перевод.");
+    }
+
+    return data;
 }
