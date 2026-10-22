@@ -62,3 +62,46 @@ test("rejects a non-JSON HTTP response", async () => {
   const translate = createTranslator({ fetchImpl: async () => new Response("not json") });
   await assert.rejects(translate(input), { code: "invalid_ai_response", status: 502 });
 });
+
+test("retries a Chinese answer once and accepts the Russian correction", async () => {
+  let calls = 0;
+  let firstSignal;
+  const translate = createTranslator({ fetchImpl: async (url, options) => {
+    calls++;
+    const body = JSON.parse(options.body);
+    assert.ok(body.format.properties.partOfSpeech.enum.includes("существительное"));
+    if (calls === 1) {
+      firstSignal = options.signal;
+      return reply(JSON.stringify({ translation: "goroutines", contextMeaning: "编译器内置的并发支持", partOfSpeech: "名词" }));
+    }
+    assert.equal(options.signal, firstSignal);
+    assert.match(body.messages[0].content, /Предыдущий ответ/);
+    return reply();
+  }});
+  assert.deepEqual(await translate(input), { ...input, ...answer });
+  assert.equal(calls, 2);
+});
+
+for (const badAnswer of [
+  { ...answer, contextMeaning: "The edge of the river." },
+  { ...answer, translation: "河岸" },
+  { ...answer, partOfSpeech: "noun" }
+]) {
+  test(`does not return persistent wrong-language content: ${JSON.stringify(badAnswer)}`, async () => {
+    let calls = 0;
+    const translate = createTranslator({ fetchImpl: async () => {
+      calls++;
+      return reply(JSON.stringify(badAnswer));
+    }});
+    await assert.rejects(translate(input), { code: "invalid_ai_language", status: 502 });
+    assert.equal(calls, 2);
+  });
+}
+
+test("allows a technical name in Latin script with a Russian explanation", async () => {
+  const technical = { translation: "JavaScript", contextMeaning: "Язык программирования", partOfSpeech: "существительное" };
+  const translate = createTranslator({ fetchImpl: async () => reply(JSON.stringify(technical)) });
+  assert.deepEqual(await translate({ word: "JavaScript", sentence: "I use JavaScript." }), {
+    word: "JavaScript", sentence: "I use JavaScript.", ...technical
+  });
+});
