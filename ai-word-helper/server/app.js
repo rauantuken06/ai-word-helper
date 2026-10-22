@@ -13,7 +13,14 @@ export function createApp({ translate, model }) {
   });
 
   app.post("/translate", async (req, res) => {
-    const { word, sentence } = req.body || {};
+    const { word, sentence, mode = "full" } = req.body || {};
+
+    if (mode !== "quick" && mode !== "full") {
+      return res.status(400).json({
+        error: "bad_request",
+        details: "Неизвестный режим перевода."
+      })
+    }
     if (
       typeof word !== "string" || !word.trim() || word.length > 100 ||
       typeof sentence !== "string" || !sentence.trim() || sentence.length > 4000
@@ -24,7 +31,7 @@ export function createApp({ translate, model }) {
       });
     }
     try {
-      res.json(await translate({ word: word.trim(), sentence }));
+      res.json(await translate({ word: word.trim(), sentence, mode }));
     } catch (error) {
       if (error instanceof TranslationError) {
         return res.status(error.status).json({ error: error.code, details: error.message });

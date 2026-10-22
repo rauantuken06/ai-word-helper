@@ -4,6 +4,15 @@ import { withTranslationCache } from "./translation-cache.js";
 
 const input = { word: "bank", sentence: "We sat on the bank of the river." };
 
+test("quick and full answers use separate cache entries", async () => {
+  let calls = 0;
+  const translate = withTranslationCache(async value => { calls++; return { mode: value.mode || "full" }; });
+  assert.deepEqual(await translate({ ...input, mode: "quick" }), { mode: "quick" });
+  assert.deepEqual(await translate(input), { mode: "full" });
+  assert.deepEqual(await translate({ ...input, mode: "full" }), { mode: "full" });
+  assert.equal(calls, 2);
+});
+
 test("repeated translations use the cached answer", async () => {
   let calls = 0;
   const translate = withTranslationCache(async () => {

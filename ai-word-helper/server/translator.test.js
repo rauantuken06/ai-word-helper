@@ -6,6 +6,28 @@ const input = { word: "bank", sentence: "We sat on the bank of the river." };
 const answer = { translation: "берег", contextMeaning: "Берег реки", partOfSpeech: "существительное" };
 const reply = (content = JSON.stringify(answer)) => Response.json({ message: { content } });
 
+test("quick mode accepts a translation without requesting explanation fields", async () => {
+  const translate = createTranslator({ fetchImpl: async (url, options) => {
+    const body = JSON.parse(options.body);
+    assert.deepEqual(body.format.required, ["translation"]);
+    assert.equal(body.options.num_predict, 64);
+    return reply(JSON.stringify({ translation: "берег" }));
+  }});
+  assert.deepEqual(await translate({ ...input, mode: "quick" }), {
+    ...input, translation: "берег", contextMeaning: "", partOfSpeech: ""
+  });
+});
+
+test("quick mode retries a wrong-language translation", async () => {
+  let calls = 0;
+  const translate = createTranslator({ fetchImpl: async () => {
+    calls++;
+    return reply(JSON.stringify({ translation: calls === 1 ? "河岸" : "берег" }));
+  }});
+  assert.equal((await translate({ ...input, mode: "quick" })).translation, "берег");
+  assert.equal(calls, 2);
+});
+
 test("sends a structured local request and preserves source text", async () => {
   const translate = createTranslator({ fetchImpl: async (url, options) => {
     assert.equal(url.href, "http://127.0.0.1:11434/api/chat");

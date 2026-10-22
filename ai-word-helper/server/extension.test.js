@@ -38,6 +38,7 @@ function setup(text) {
       }
     },
     fetch: async (url, options) => {
+      assert.equal(options.headers?.["Content-Type"], "application/json");
       const input = JSON.parse(options.body);
       requests.push(input);
       return { ok: true, json: async () => ({ ...input, translation: "берег" }) };
@@ -64,7 +65,7 @@ test("double click translates the word under the pointer even when selection is 
   const page = setup("Hello! We sat on the bank of the river.");
   assert.equal(page.listeners.dblclick.capture, true);
   await page.click(21);
-  assert.deepEqual(page.requests, [{ word: "bank", sentence: "We sat on the bank of the river." }]);
+  assert.deepEqual(page.requests, [{ word: "bank", sentence: "We sat on the bank of the river.", mode: "quick" }]);
   assert.deepEqual(page.popups, [["loading", "bank"], ["result", "берег"]]);
 });
 

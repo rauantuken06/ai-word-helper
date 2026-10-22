@@ -4,7 +4,12 @@ export function withTranslationCache(translate) {
     const ttlMs = 30 * 60 * 1000;
 
     return async function cachedTranslate(input) {
-        const key = JSON.stringify([input.word, input.sentence]);
+        const key = JSON.stringify([
+            input.mode || "full",
+            input.word,
+            input.sentence
+        ]);
+
         const cached = cache.get(key);
 
         if (cached && cached.expiresAt > Date.now()) {
