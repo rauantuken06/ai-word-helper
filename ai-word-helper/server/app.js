@@ -1,19 +1,35 @@
 import express from "express";
 import cors from "cors";
 import { TranslationError } from "./translator.js";
+import { normalizeSelection } from "./hybrid-translator.js";
 
-export function createApp({ translate, model }) {
+export function createApp({
+  translate,
+  model,
+  provider = "ollama"
+}) {
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: "16kb" }));
 
   // Liveness only: this endpoint does not load or query the model.
   app.get("/", (req, res) => {
-    res.json({ ok: true, message: "AI Word Helper server is running", provider: "ollama", model });
+    res.json({
+      ok: true,
+      message: "AI Word Helper server is running",
+      provider,
+      model
+    });
   });
 
   app.post("/translate", async (req, res) => {
-    const { word, sentence, mode = "full" } = req.body || {};
+    const {
+      word,
+      sentence,
+      mode = "full",
+      selectionStart,
+      selectionEnd
+    } = req.body || {};
 
     if (mode !== "quick" && mode !== "full") {
       return res.status(400).json({
@@ -31,7 +47,19 @@ export function createApp({ translate, model }) {
       });
     }
     try {
-      res.json(await translate({ word: word.trim(), sentence, mode }));
+      const input = {
+        word: word.trim(),
+        sentence,
+        mode,
+        selectionStart,
+        selectionEnd
+      };
+
+      if (provider === "libretranslate+spacy") {
+        Object.assign(input, normalizeSelection(input));
+      }
+
+      res.json(await translate(input));
     } catch (error) {
       if (error instanceof TranslationError) {
         return res.status(error.status).json({ error: error.code, details: error.message });

@@ -6,6 +6,22 @@ const input = { word: "bank", sentence: "We sat on the bank of the river." };
 const answer = { translation: "берег", contextMeaning: "Берег реки", partOfSpeech: "существительное" };
 const reply = (content = JSON.stringify(answer)) => Response.json({ message: { content } });
 
+test("full mode marks the selected occurrence before sending it to Ollama", async () => {
+  let calls = 0;
+  const translate = createTranslator({ fetchImpl: async (url, options) => {
+    calls++;
+    const body = JSON.parse(options.body);
+    assert.deepEqual(JSON.parse(body.messages[1].content), {
+      word: "saw", sentence: "I saw a saw.", markedSentence: "I saw a ⟦saw⟧."
+    });
+    return reply(JSON.stringify({ translation: "пила", contextMeaning: "Инструмент для распила", partOfSpeech: "существительное" }));
+  }});
+  const result = await translate({ word: "saw", sentence: "I saw a saw.", selectionStart: 8, selectionEnd: 11, mode: "full" });
+  assert.equal(calls, 1);
+  assert.equal(result.translation, "пила");
+  assert.equal(result.sentence, "I saw a saw.");
+});
+
 test("quick mode accepts a translation without requesting explanation fields", async () => {
   const translate = createTranslator({ fetchImpl: async (url, options) => {
     const body = JSON.parse(options.body);

@@ -1,4 +1,6 @@
 let helperPopup = null;
+let popupGeneration = 0;
+let activeRequest = null;
 
 document.addEventListener("dblclick", async (event) => {
     const target = event.target;
@@ -11,22 +13,36 @@ document.addEventListener("dblclick", async (event) => {
     const selection = window.getSelection();
     const selectedText = selection ? selection.toString().trim() : "";
     const pointedWord = getWordAtPoint(event);
-    const word = pointedWord?.word || selectedText;
+    const selectedWord = pointedWord || getWordFromSelection(selection, selectedText);
+    const word = selectedWord?.word || selectedText;
 
     if (!/^[A-Za-z]+(?:['’‘‐‑-][A-Za-z]+)*$/.test(word)) return;
 
-    const sentence = pointedWord?.sentence || getSentenceFromSelection(selection) || word;
+    const sentence = selectedWord?.sentence || getSentenceFromSelection(selection) || word;
 
     removePopup();
+    const generation = popupGeneration;
+    const controller = new AbortController();
+    activeRequest = controller;
     showLoadingPopup(event.pageX, event.pageY, word);
 
     try {
-        const data = await fetchTranslation(word, sentence, "quick");
+        const data = await fetchTranslation(
+            word,
+            sentence,
+            "quick",
+            selectedWord || {},
+            controller.signal
+        );
 
+        if (generation !== popupGeneration) return;
+        activeRequest = null;
         removePopup();
         showResultPopup(event.pageX, event.pageY, data);
     } catch (error) {
+        if (generation !== popupGeneration || error.name === "AbortError") return;
         console.error(error);
+        activeRequest = null;
         removePopup();
         showErrorPopup(event.pageX, event.pageY, error instanceof TypeError
             ? "Не удалось подключиться к серверу. Запустите сервер командой npm start."
@@ -51,7 +67,14 @@ function getWordAtPoint(event) {
                 event.clientX >= rect.left && event.clientX <= rect.right &&
                 event.clientY >= rect.top && event.clientY <= rect.bottom);
             if (hit) {
-                return { word: match[0], sentence: getSentenceAtOffset(text, match.index) };
+                return {
+                    word: match[0],
+                    ...getContextFromNode(
+                        node,
+                        match.index,
+                        match[0].length
+                    )
+                };
             }
         }
     }
@@ -68,18 +91,55 @@ function getSentenceFromSelection(selection) {
     const node = selection.anchorNode;
     if (node.nodeType !== Node.TEXT_NODE) return "";
 
-    const text = node.textContent || "";
-    return getSentenceAtOffset(text, selection.anchorOffset);
+    return getContextFromNode(node, selection.anchorOffset, 0).sentence;
 }
 
-function getSentenceAtOffset(text, offset) {
-    let start = offset;
-    let end = offset;
+function getWordFromSelection(selection, word) {
+    if (!selection?.rangeCount || !word) return null;
+    const range = selection.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return null;
+    const selected = selection.toString();
+    const offset = range.startOffset + selected.length - selected.trimStart().length;
+    if ((node.textContent || "").slice(offset, offset + word.length) !== word) return null;
+    return { word, ...getContextFromNode(node, offset, word.length) };
+}
 
-    while (start > 0 && !/[.!?]/.test(text[start - 1])) start--;
-    while (end < text.length && !/[.!?]/.test(text[end])) end++;
+function getContextFromNode(node, offset, length) {
+    // Collect the containing text block, preserving inline markup and node
+    // boundaries in one coordinate system shared with the backend.
+    const blockTags = /^(P|DIV|LI|BLOCKQUOTE|PRE|TD|TH|H[1-6]|FIGCAPTION|DT|DD|ARTICLE|SECTION|MAIN|BODY)$/;
+    let root = node.parentElement;
+    while (root?.parentElement && !blockTags.test(root.tagName)) root = root.parentElement;
+    if (!root) return getContextAtOffset(node.textContent || "", offset, length);
 
-    return text.slice(start, Math.min(end + 1, text.length)).trim();
+    let text = "";
+    let nodeStart = null;
+    function collect(current) {
+        if (current.nodeType === Node.TEXT_NODE) {
+            if (current === node) nodeStart = text.length;
+            text += current.textContent || "";
+            return;
+        }
+        if (current.nodeType !== Node.ELEMENT_NODE) return;
+        if (/^(SCRIPT|STYLE|NOSCRIPT|INPUT|TEXTAREA|BUTTON)$/.test(current.tagName) || current.hidden) return;
+        if (typeof window.getComputedStyle === "function") {
+            const style = window.getComputedStyle(current);
+            if (style.display === "none" || style.visibility === "hidden") return;
+        }
+        if (current.tagName === "BR") {
+            text += "\n";
+            return;
+        }
+        const boundary = current !== root && blockTags.test(current.tagName);
+        if (boundary) text += "\n";
+        for (const child of current.childNodes) collect(child);
+        if (boundary) text += "\n";
+    }
+    collect(root);
+    return nodeStart === null
+        ? getContextAtOffset(node.textContent || "", offset, length)
+        : getContextAtOffset(text, nodeStart + offset, length);
 }
 
 function showLoadingPopup(x, y, word) {
@@ -103,9 +163,7 @@ function showResultPopup(x, y, data) {
     popup.style.left = `${x + 10}px`;
     popup.style.top = `${y + 10}px`;
 
-    const hasDetails = Boolean(
-        data.contextMeaning && data.partOfSpeech
-    );
+    const hasDetails = Boolean(data.contextMeaning);
     popup.classList.toggle("is-detailed", hasDetails);
     popup.setAttribute("role", "region");
     popup.setAttribute("aria-label", `Перевод слова ${data.word || ""}`);
@@ -114,13 +172,19 @@ function showResultPopup(x, y, data) {
         <div class="card-header">
             <div class="word-tags">
                 <span class="title word-badge" lang="en">${escapeHtml(data.word || "")}</span>
-                ${hasDetails ? `<span class="part-of-speech">${escapeHtml(data.partOfSpeech)}</span>` : ""}
+                ${data.partOfSpeech ? `<span class="part-of-speech">${escapeHtml(data.partOfSpeech)}</span>` : ""}
             </div>
             <button type="button" class="speak-btn" aria-label="Произнести слово" title="Произнести слово">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M16 9a5 5 0 0 1 0 6m3-9a9 9 0 0 1 0 12"/>
                 </svg>
             </button>
+        </div>
+
+        <div class="muted">
+            ${data.translationKind === "standalone"
+                ? "Вариант перевода слова"
+                : "Перевод в контексте"}
         </div>
 
         <div class="translation" lang="ru">${escapeHtml(data.translation || "")}</div>
@@ -132,7 +196,14 @@ function showResultPopup(x, y, data) {
         </div>
         ` : ""}
 
-        ${data.sentence ? `<div class="sentence" lang="en">${highlightWord(data.sentence, data.word)}</div>` : ""}
+        ${data.sentence ? `<div class="sentence" lang="en">${highlightWord(data.sentence, data.word, data.selectionStart, data.selectionEnd)}</div>` : ""}
+
+        ${data.sentenceTranslation ? `
+            <div class="sentence" lang="ru">
+                <strong>Перевод предложения:</strong>
+                ${escapeHtml(data.sentenceTranslation)}
+            </div>
+        ` : ""}
 
         <div class="details-error error" role="status" aria-live="polite"></div>
 
@@ -167,21 +238,31 @@ function showResultPopup(x, y, data) {
         detailsButton.disabled = true;
         detailsButton.textContent = "Загружаю…";
         popup.querySelector(".details-error").textContent = "";
+        const generation = popupGeneration;
+        const controller = new AbortController();
+        activeRequest = controller;
 
         try {
             const details = await fetchTranslation(
             data.word,
             data.sentence,
-            "full"
+            "full",
+            data,
+            controller.signal
             );
 
             // Не заменяем окно другого слова или уже закрытое окно.
-            if (helperPopup !== popup || !popup.isConnected) return;
+            if (generation !== popupGeneration || helperPopup !== popup || !popup.isConnected) return;
 
+            activeRequest = null;
             removePopup();
-            showResultPopup(x, y, details);
+            showResultPopup(x, y, {
+                ...data,
+                ...details,
+                partOfSpeech: data.partOfSpeech || details.partOfSpeech
+            });
         } catch (error) {
-            if (helperPopup !== popup || !popup.isConnected) return;
+            if (generation !== popupGeneration || helperPopup !== popup || !popup.isConnected || error.name === "AbortError") return;
 
             popup.querySelector(".details-error").textContent =
             error.message || "Не удалось загрузить объяснение.";
@@ -189,6 +270,8 @@ function showResultPopup(x, y, data) {
             detailsButton.disabled = false;
             detailsButton.textContent = "Повторить";
             keepPopupInViewport(popup);
+        } finally {
+            if (activeRequest === controller) activeRequest = null;
         }
         });
     }
@@ -215,6 +298,9 @@ function showErrorPopup(x, y, message) {
 }
 
 function removePopup() {
+    popupGeneration++;
+    activeRequest?.abort();
+    activeRequest = null;
     if (helperPopup) {
         helperPopup.remove();
         helperPopup = null;
@@ -246,8 +332,15 @@ function escapeHtml(str) {
         .replaceAll("'", "&#039;")
 }
 
-function highlightWord(sentence, word) {
+function highlightWord(sentence, word, selectionStart, selectionEnd) {
     if (!word) return escapeHtml(sentence);
+    if (Number.isInteger(selectionStart) && Number.isInteger(selectionEnd) &&
+        selectionStart >= 0 && selectionEnd > selectionStart && selectionEnd <= sentence.length &&
+        sentence.slice(selectionStart, selectionEnd) === word) {
+        return escapeHtml(sentence.slice(0, selectionStart)) +
+            `<mark>${escapeHtml(sentence.slice(selectionStart, selectionEnd))}</mark>` +
+            escapeHtml(sentence.slice(selectionEnd));
+    }
     const escapedWord = String(word).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const pattern = new RegExp(`(^|[^A-Za-z’‘'‐‑-])(${escapedWord})(?=$|[^A-Za-z’‘'‐‑-])`, "gi");
     let result = "";
@@ -261,20 +354,60 @@ function highlightWord(sentence, word) {
     return result + escapeHtml(sentence.slice(offset));
 }
 
-async function fetchTranslation(word, sentence, mode) {
-    const response = await fetch("http://localhost:3000/translate", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ word, sentence, mode })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-        throw new Error(data.details || "Не удалось получить перевод.");
+async function fetchTranslation(
+  word,
+  sentence,
+  mode,
+  { selectionStart, selectionEnd } = {},
+  signal
+) {
+  const response = await fetch(
+    "http://localhost:3000/translate",
+    {
+      method: "POST",
+      signal,
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        word,
+        sentence,
+        mode,
+        selectionStart,
+        selectionEnd
+      })
     }
+  );
 
-    return data;
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data.details || "Не удалось получить перевод."
+    );
+  }
+
+  return data;
+}
+
+function getContextAtOffset(text, offset, length) {
+  let start = offset;
+  let end = offset;
+
+  while (start > 0 && !/[.!?\r\n]/.test(text[start - 1])) start--;
+  while (end < text.length && !/[.!?\r\n]/.test(text[end])) end++;
+
+  const raw = text.slice(
+    start,
+    Math.min(end + 1, text.length)
+  );
+
+  const leading = raw.length - raw.trimStart().length;
+  const selectionStart = offset - start - leading;
+
+  return {
+    sentence: raw.trim(),
+    selectionStart,
+    selectionEnd: selectionStart + length
+  };
 }

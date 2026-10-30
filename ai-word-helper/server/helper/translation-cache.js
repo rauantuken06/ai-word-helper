@@ -7,7 +7,9 @@ export function withTranslationCache(translate) {
         const key = JSON.stringify([
             input.mode || "full",
             input.word,
-            input.sentence
+            input.sentence,
+            input.selectionStart,
+            input.selectionEnd
         ]);
 
         const cached = cache.get(key);
